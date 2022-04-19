@@ -12,7 +12,6 @@ Parameters:
       - m4.large
       - m5.large
       - m5.medium
-      - t3.medium
     ConstraintDescription: must be a valid EC2 instance type.
   ENVIRONMENT:
     Type: String
