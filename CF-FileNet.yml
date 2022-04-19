@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: m5.large
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - m4.large
+      - m5.large
+    ConstraintDescription: must be a valid EC2 instance type.
+  ENVIRONMENT:
+    Type: String
+    Default: TEST
+    Description: What is the type of environment that this instance is for?
+  CUSTOMER:
+    Type: String
+    Default: ActiveWorx
+    Description: Which client is this Instance for.
+  InstanceName:
+    Type: String
+    Description: This will be the Name tag of the EC2 instance.
+  ComputerName:
+    Type: String
+    Description: This will be the name of the computer or host name. Make sure that this name is set to something unique.
+  AMI:
+    Type: String
+    Default: ami-08aa543413d7bdc57
+    Description: The windows AMI to use, keep this up to date with the latest AMI ID's
+ 
+  
+Resources:
+  EC2Instance:
+    Type: 'AWS::EC2::Instance' 
+    Properties:
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: Developer
+      SsmAssociations: 
+        - 
+          DocumentName: AWS-JoinDirectoryServiceDomain
+          AssociationParameters:
+            - Key: directoryId
+              Value: 
+                - d-906723c8af
+            - Key: directoryName
+              Value:
+                - miria-active.net
+            - Key: dnsIpAddresses
+              Value:
+                - 172.31.5.4
+                - 172.31.32.15
+      KeyName: 'HarcrosKeyPaid'
+      ImageId: !Ref AMI
+      SecurityGroupIds:
+        - sg-2da91552
+        - sg-4b07e736
+        - sg-cc878fb6
+        - sg-1c6b6c66
+      SubnetId: subnet-f78e77cb
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 60
+        - DeviceName: xvdb
+          Ebs:
+            DeleteOnTermination: false
+            VolumeSize: 60
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          <runAsAdmin>
+          $diskNumber = (Get-Disk | ? {($_.OperationalStatus -eq "Offline") -and ($_."PartitionStyle" -eq "RAW") }).Number
+          Initialize-Disk -Number $diskNumber -PartitionStyle "MBR"
+          $part = New-Partition -DiskNumber $diskNumber -UseMaximumSize -IsActive -AssignDriveLetter
+          Format-Volume -DriveLetter $part.DriveLetter -Confirm:$FALSE
+          New-Item -Path C:\Software -Type 'Directory'
+          New-Item -Path D:\Software\IM -Type 'Directory'
+          New-Item -Path "D:\Program Files\IBM\Installation Manager" -Type 'Directory'
+          New-Item -Path "D:\Program Files\IBM\WebSphere" -Type 'Directory'
+          New-Item -Path "D:\Program Files\IBM\ECMClient" -Type 'Directory'
+          New-Item -Path "D:\Program Files\IBM\FileNet\ContentEngine" -Type 'Directory'
+          New-Item -Path "D:\Software\Scripts" -Type 'Directory'
+          New-Item -Path "D:\Jars" -Type 'Directory'
+          New-Item -Path "D:\LTPA" -Type 'Directory'
+          New-Item -Path "D:\File_Storage_Area\${CUSTOMER}-${ENVIRONMENT}" -Type 'Directory'
+          Copy-S3Object -BucketName miria-software-repository -Key IM/agent.installer.win32.win32.x86_64_1.9.0.20190715_0328.zip -LocalFile C:\Software\IM.zip
+          Copy-S3Object -BucketName miria-software-repository -Key IM/duo-win-login-4.1.3.exe -LocalFile D:\Software\duo-win-login-4.1.3.exe
+          Copy-S3Object -BucketName miria-software-repository -Key IM/npp.8.2.1.Installer.x64.exe -LocalFile D:\Software\npp.8.2.1.Installer.x64.exe
+          Copy-S3Object -BucketName miria-software-repository -Key IM/sqljdbc4.jar -LocalFile D:\Jars\sqljdbc4.jar
+          Copy-S3Object -BucketName miria-software-repository -Key IM/Filenet_CPE_5.5.0.zip -LocalFile C:\Software\Filenet_CPE_5.5.0.zip
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/filenet_deployment_script.ps1 -LocalFile D:\Software\Scripts\filenet_deployment_script.ps1
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/update_CPE_xml.ps1 -LocalFile D:\Software\Scripts\update_CPE_xml.ps1
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/config.py -LocalFile D:\Software\Scripts\config.py
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/sql_helper_script.ps1 -LocalFile D:\Software\Scripts\sql_helper_script.ps1
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/GCD_DataScript.sql -LocalFile D:\Software\Scripts\GCD_DataScript.sql
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/OS1_DataScript.sql -LocalFile D:\Software\Scripts\OS1_DataScript.sql
+          Copy-S3Object -BucketName miria-software-repository -Key Scripts/ICN_DataScript.sql -LocalFile D:\Software\Scripts\ICN_DataScript.sql
+          Expand-Archive -Path C:\Software\IM.zip -DestinationPath D:\Software\IM\
+          Expand-Archive -Path C:\Software\Filenet_CPE_5.5.0.zip -DestinationPath D:\Software\Filenet_CPE_5.5.0
+          # Installation Manager install
+          cd D:\Software\IM\tools\
+          ./imcl install com.ibm.cic.agent -repositories D:\Software\IM\repository.config -acceptLicense -installationDirectory "D:\Program Files\IBM\Installation Manager"
+          cd ..\..\..\..\
+          # installing WebSphere
+          cd "D:\Program Files\IBM\Installation Manager\eclipse\tools"
+          ./imutilsc saveCredential -passportAdvantage -userName vrahman@activeworx.com -userPassword Avernus1 -secureStorageFile pw
+          ./imcl install com.ibm.websphere.BASE.v90_9.0.11.20190312_2048 com.ibm.java.jdk.v8_8.0.3011.20160909_1138 -connectPassportAdvantage -secureStorageFile pw -sharedResourcesDirectory "D:\Program Files\IBM\IMShared" -installFixes all -installationDirectory "D:\Program Files\IBM\WebSphere" -acceptLicense
+          cd ..\..\..\..\
+          #install Duo RDP, Victor's SKEY          
+          cd D:\Software\
+          ./duo-win-login-4.1.3 /S /V" /qn IKEY="DI8VYPKWEHSF101LDJFW" SKEY="EaB6a6ulALURgmFtt9S8tpCEYnd8o1rsFZC0q79v" HOST="api-d9b9eb1d.duosecurity.com" AUTOPUSH="#1" FAILOPEN="#1" SMARTCARD="#0" RDPONLY="#1""
+          ## install notepad++
+          ./npp.8.2.1.Installer.x64.exe /S
+          ## Firewall port opening and Naming
+          $ClientName = "${CUSTOMER}"
+          $orbName = 'ORB_' + $ClientName
+          $iiopName = 'IIOP_' + $ClientName
+          $defaultName = 'Default_' + $ClientName
+          New-NetFirewallRule -DisplayName $orbName -Profile Any -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9100
+          New-NetFirewallRule -DisplayName $iiopName -Profile Any -Direction Inbound -Action Allow -Protocol TCP -LocalPort 2809
+          New-NetFirewallRule -DisplayName $defaultName -Profile Any -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9080
+          ## install notepad++
+          ./npp.8.2.1.Installer.x64.exe /S
+          ## rename computer
+          $hostname = "${ComputerName}"
+          Rename-Computer -NewName $hostname -Restart 
+          </runAsAdmin>
+          </powershell>
+      Tags:
+        -
+          Key: Name
+          Value: !Ref InstanceName
+        -
+          Key: CUSTOMER
+          Value: !Ref CUSTOMER
+        -
+          Key: ENVIRONMENT
+          Value: !Ref ENVIRONMENT
+        -
+          Key: HostName
+          Value: !Ref ComputerName
+Outputs:
+  PublicIP:
+    Description: Public IP address of the newly created EC2 instance
+    Value: 
+      Fn::GetAtt:      
+        - EC2Instance
+        - PublicIp
